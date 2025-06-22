@@ -318,5 +318,3 @@ elif view_mode == "2025 Predictions":
                 st.metric("Predicted Growth", f"{growth_rate:.1f}%")
             else:
                 st.metric("Predicted Growth", "N/A")
-        
-        with col4:
