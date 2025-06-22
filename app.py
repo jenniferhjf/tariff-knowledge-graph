@@ -406,154 +406,211 @@ elif view_mode == "Knowledge Graph Network":
     if selected_year == 2025:
         st.info("🔮 Network based on predicted trade relationships")
     
-    # Build network graph
-    G = nx.Graph()
-    
-    # Add country nodes
-    for country in countries_info.keys():
-        exports = filtered_df[filtered_df['exporter'] == country]['trade_value'].sum()
-        imports = filtered_df[filtered_df['importer'] == country]['trade_value'].sum()
-        avg_confidence = filtered_df[
-            (filtered_df['exporter'] == country) | (filtered_df['importer'] == country)
-        ]['confidence'].mean() if selected_year == 2025 else 1.0
+    try:
+        # Build network graph
+        G = nx.Graph()
         
-        G.add_node(country, 
-                  type='country',
-                  trade_volume=exports + imports,
-                  exports=exports,
-                  imports=imports,
-                  confidence=avg_confidence)
-    
-    # Add product nodes
-    for product in selected_products:
-        trade_vol = filtered_df[filtered_df['product'] == product]['trade_value'].sum()
-        avg_confidence = filtered_df[filtered_df['product'] == product]['confidence'].mean() if selected_year == 2025 else 1.0
-        G.add_node(product, 
-                  type='product',
-                  trade_volume=trade_vol,
-                  confidence=avg_confidence)
-    
-    # Add trade relationship edges
-    for _, row in filtered_df.iterrows():
-        # Country-to-country trade relationships
-        if G.has_edge(row['exporter'], row['importer']):
-            G[row['exporter']][row['importer']]['weight'] += row['trade_value']
-        else:
-            G.add_edge(row['exporter'], row['importer'], 
+        # Add country nodes
+        for country in countries_info.keys():
+            exports = filtered_df[filtered_df['exporter'] == country]['trade_value'].sum()
+            imports = filtered_df[filtered_df['importer'] == country]['trade_value'].sum()
+            avg_confidence = filtered_df[
+                (filtered_df['exporter'] == country) | (filtered_df['importer'] == country)
+            ]['confidence'].mean() if selected_year == 2025 else 1.0
+            
+            G.add_node(country, 
+                      type='country',
+                      trade_volume=exports + imports,
+                      exports=exports,
+                      imports=imports,
+                      confidence=avg_confidence)
+        
+        # Add product nodes
+        for product in selected_products:
+            trade_vol = filtered_df[filtered_df['product'] == product]['trade_value'].sum()
+            avg_confidence = filtered_df[filtered_df['product'] == product]['confidence'].mean() if selected_year == 2025 else 1.0
+            G.add_node(product, 
+                      type='product',
+                      trade_volume=trade_vol,
+                      confidence=avg_confidence)
+        
+        # Add trade relationship edges
+        for _, row in filtered_df.iterrows():
+            # Country-to-country trade relationships
+            if G.has_edge(row['exporter'], row['importer']):
+                G[row['exporter']][row['importer']]['weight'] += row['trade_value']
+            else:
+                G.add_edge(row['exporter'], row['importer'], 
+                          weight=row['trade_value'],
+                          relation='trade',
+                          confidence=row['confidence'])
+            
+            # Country-product relationships
+            G.add_edge(row['exporter'], row['product'], 
                       weight=row['trade_value'],
-                      relation='trade',
+                      relation='export',
+                      confidence=row['confidence'])
+            G.add_edge(row['importer'], row['product'], 
+                      weight=row['trade_value'],
+                      relation='import',
                       confidence=row['confidence'])
         
-        # Country-product relationships
-        G.add_edge(row['exporter'], row['product'], 
-                  weight=row['trade_value'],
-                  relation='export',
-                  confidence=row['confidence'])
-        G.add_edge(row['importer'], row['product'], 
-                  weight=row['trade_value'],
-                  relation='import',
-                  confidence=row['confidence'])
-    
-    # Use spring layout
-    pos = nx.spring_layout(G, k=3, iterations=50)
-    
-    # Create Plotly network graph with confidence indicators
-    edge_x = []
-    edge_y = []
-    edge_colors = []
-    
-    for edge in G.edges():
-        x0, y0 = pos[edge[0]]
-        x1, y1 = pos[edge[1]]
-        edge_x.extend([x0, x1, None])
-        edge_y.extend([y0, y1, None])
-        
-        # Color edges based on confidence for predictions
-        if selected_year == 2025:
-            confidence = G[edge[0]][edge[1]].get('confidence', 1.0)
-            alpha = int(confidence * 255)
-            edge_colors.extend([f'rgba(136,136,136,{alpha/255})'] * 3)
+        # Check if graph has nodes
+        if G.number_of_nodes() == 0:
+            st.warning("No data available for the selected filters")
         else:
-            edge_colors.extend(['#888'] * 3)
-    
-    edge_trace = go.Scatter(x=edge_x, y=edge_y,
-                           line=dict(width=0.5, color='#888'),
-                           hoverinfo='none',
-                           mode='lines')
-    
-    node_x = []
-    node_y = []
-    node_text = []
-    node_colors = []
-    node_sizes = []
-    
-    for node in G.nodes():
-        x, y = pos[node]
-        node_x.append(x)
-        node_y.append(y)
-        node_text.append(node)
-        
-        if G.nodes[node]['type'] == 'country':
-            # Adjust color intensity based on confidence for predictions
+            # Use spring layout
+            pos = nx.spring_layout(G, k=3, iterations=50)
+            
+            # Create Plotly network graph with confidence indicators
+            edge_x = []
+            edge_y = []
+            
+            for edge in G.edges():
+                x0, y0 = pos[edge[0]]
+                x1, y1 = pos[edge[1]]
+                edge_x.extend([x0, x1, None])
+                edge_y.extend([y0, y1, None])
+            
+            edge_trace = go.Scatter(x=edge_x, y=edge_y,
+                                   line=dict(width=0.5, color='#888'),
+                                   hoverinfo='none',
+                                   mode='lines',
+                                   showlegend=False)
+            
+            node_x = []
+            node_y = []
+            node_text = []
+            node_colors = []
+            node_sizes = []
+            node_info = []
+            
+            for node in G.nodes():
+                x, y = pos[node]
+                node_x.append(x)
+                node_y.append(y)
+                node_text.append(node)
+                
+                node_data = G.nodes[node]
+                
+                if node_data['type'] == 'country':
+                    # Adjust color intensity based on confidence for predictions
+                    if selected_year == 2025:
+                        confidence = node_data.get('confidence', 1.0)
+                        # Use confidence to adjust color intensity
+                        intensity = int(173 + (255-173) * confidence)
+                        node_colors.append(f'rgb(173,216,{intensity})')
+                    else:
+                        node_colors.append('lightblue')
+                    node_sizes.append(max(10, node_data['trade_volume']/1e8))
+                    
+                    # Create hover info
+                    exports = node_data.get('exports', 0)
+                    imports = node_data.get('imports', 0)
+                    conf_text = f"<br>Confidence: {confidence:.1%}" if selected_year == 2025 else ""
+                    node_info.append(f"<b>{node}</b><br>Type: Country<br>Exports: ${exports/1e9:.1f}B<br>Imports: ${imports/1e9:.1f}B{conf_text}")
+                else:  # product
+                    if selected_year == 2025:
+                        confidence = node_data.get('confidence', 1.0)
+                        intensity = int(240 + (255-240) * confidence)
+                        node_colors.append(f'rgb({intensity},128,128)')
+                    else:
+                        node_colors.append('lightcoral')
+                    node_sizes.append(15)
+                    
+                    trade_vol = node_data.get('trade_volume', 0)
+                    conf_text = f"<br>Confidence: {confidence:.1%}" if selected_year == 2025 else ""
+                    node_info.append(f"<b>{node}</b><br>Type: Product<br>Trade Volume: ${trade_vol/1e9:.1f}B{conf_text}")
+            
+            node_trace = go.Scatter(x=node_x, y=node_y,
+                                   mode='markers+text',
+                                   hoverinfo='text',
+                                   hovertext=node_info,
+                                   text=node_text,
+                                   textposition="middle center",
+                                   marker=dict(size=node_sizes,
+                                             color=node_colors,
+                                             line=dict(width=2, color='white')),
+                                   showlegend=False)
+            
+            # 修复的Layout创建 - 这是关键修复部分
+            graph_title = 'Trade Relationship Knowledge Graph'
             if selected_year == 2025:
-                confidence = G.nodes[node].get('confidence', 1.0)
-                blue_intensity = int(173 + (255-173) * confidence)  # lightblue to blue
-                node_colors.append(f'rgb(173,216,{blue_intensity})')
-            else:
-                node_colors.append('lightblue')
-            node_sizes.append(max(10, G.nodes[node]['trade_volume']/1e8))
-        else:  # product
+                graph_title += ' (2025 Predictions)'
+            
+            # 创建layout参数字典，避免参数冲突
+            layout_params = {
+                'showlegend': False,
+                'hovermode': 'closest',
+                'margin': dict(b=20, l=5, r=5, t=40),
+                'plot_bgcolor': 'white',
+                'paper_bgcolor': 'white'
+            }
+            
+            # 安全地添加标题
+            layout_params['title'] = {
+                'text': graph_title,
+                'x': 0.5,
+                'xanchor': 'center',
+                'font': {'size': 16}
+            }
+            
+            # 安全地添加坐标轴设置
+            layout_params['xaxis'] = {
+                'showgrid': False,
+                'zeroline': False,
+                'showticklabels': False,
+                'visible': False
+            }
+            
+            layout_params['yaxis'] = {
+                'showgrid': False,
+                'zeroline': False,
+                'showticklabels': False,
+                'visible': False
+            }
+            
+            # 添加注释
+            annotation_text = "Node size represents trade volume, Blue=Countries, Red=Products."
             if selected_year == 2025:
-                confidence = G.nodes[node].get('confidence', 1.0)
-                coral_intensity = int(240 + (255-240) * confidence)
-                node_colors.append(f'rgb({coral_intensity},128,128)')
-            else:
-                node_colors.append('lightcoral')
-            node_sizes.append(15)
+                annotation_text += " For predictions: Intensity shows confidence level."
+            
+            layout_params['annotations'] = [
+                {
+                    'text': annotation_text,
+                    'showarrow': False,
+                    'xref': "paper",
+                    'yref': "paper",
+                    'x': 0.005,
+                    'y': -0.002,
+                    'xanchor': "left",
+                    'yanchor': "bottom",
+                    'font': {'color': "black", 'size': 12}
+                }
+            ]
+            
+            # 创建图形
+            fig = go.Figure(
+                data=[edge_trace, node_trace],
+                layout=go.Layout(**layout_params)
+            )
+            
+            st.plotly_chart(fig, use_container_width=True)
+            
+            # Network statistics with prediction metrics
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.metric("Number of Nodes", G.number_of_nodes())
+            with col2:
+                st.metric("Number of Edges", G.number_of_edges())
+            with col3:
+                if G.number_of_nodes() > 0:
+                    avg_degree = sum(dict(G.degree()).values()) / G.number_of_nodes()
+                    st.metric("Average Degree", f"{avg_degree:.1f}")
     
-    node_trace = go.Scatter(x=node_x, y=node_y,
-                           mode='markers+text',
-                           hoverinfo='text',
-                           text=node_text,
-                           textposition="middle center",
-                           marker=dict(size=node_sizes,
-                                     color=node_colors,
-                                     line=dict(width=2)))
-    
-    graph_title = 'Trade Relationship Knowledge Graph'
-    if selected_year == 2025:
-        graph_title += ' (2025 Predictions)'
-    
-    fig = go.Figure(data=[edge_trace, node_trace],
-                   layout=go.Layout(
-                       title=graph_title,
-                       titlefont_size=16,
-                       showlegend=False,
-                       hovermode='closest',
-                       margin=dict(b=20,l=5,r=5,t=40),
-                       annotations=[ dict(
-                           text="Node size represents trade volume, Blue=Countries, Red=Products. For predictions: Intensity shows confidence level.",
-                           showarrow=False,
-                           xref="paper", yref="paper",
-                           x=0.005, y=-0.002,
-                           xanchor="left", yanchor="bottom",
-                           font=dict(color="black", size=12)
-                       )],
-                       xaxis=dict(showgrid=False, zeroline=False, showticklabels=False),
-                       yaxis=dict(showgrid=False, zeroline=False, showticklabels=False)))
-    
-    st.plotly_chart(fig, use_container_width=True)
-    
-    # Network statistics with prediction metrics
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Number of Nodes", G.number_of_nodes())
-    with col2:
-        st.metric("Number of Edges", G.number_of_edges())
-    with col3:
-        if G.number_of_nodes() > 0:
-            avg_degree = sum(dict(G.degree()).values()) / G.number_of_nodes()
-            st.metric("Average Degree", f"{avg_degree:.1f}")
+    except Exception as e:
+        st.error(f"Error creating knowledge graph: {str(e)}")
+        st.info("Please try adjusting the filters or selecting different parameters.")
 
 elif view_mode == "Comprehensive Dashboard":
     st.header("📊 Comprehensive Trade Dashboard")
